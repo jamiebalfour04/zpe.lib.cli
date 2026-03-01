@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" build-on-make="true" name="zpe.lib.cli">
+    <output-path>$PROJECT_DIR$/build</output-path>
+    <root id="archive" name="zpe.lib.cli.jar">
+      <element id="module-output" name="zpe.lib.cli" />
+    </root>
+  </artifact>
+</component>
