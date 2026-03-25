@@ -3,10 +3,10 @@ import jamiebalfour.zpe.core.YASSByteCodes;
 import jamiebalfour.zpe.core.ZPEFunction;
 import jamiebalfour.zpe.core.ZPERuntimeEnvironment;
 import jamiebalfour.zpe.core.ZPEStructure;
-import jamiebalfour.zpe.interfaces.ZPECustomFunction;
-import jamiebalfour.zpe.interfaces.ZPELibrary;
-import jamiebalfour.zpe.interfaces.ZPEType;
-import jamiebalfour.zpe.types.*;
+import jamiebalfour.zpe.core.interfaces.ZPECustomFunction;
+import jamiebalfour.zpe.core.interfaces.ZPELibrary;
+import jamiebalfour.zpe.core.interfaces.ZPEType;
+import jamiebalfour.zpe.core.types.*;
 
 import javax.naming.NamingEnumeration;
 import javax.naming.directory.Attribute;
