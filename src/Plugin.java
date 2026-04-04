@@ -1,12 +1,15 @@
 import jamiebalfour.HelperFunctions;
 import jamiebalfour.zpe.core.YASSByteCodes;
-import jamiebalfour.zpe.core.ZPEFunction;
-import jamiebalfour.zpe.core.ZPERuntimeEnvironment;
+import jamiebalfour.zpe.core.ZPEModule;
 import jamiebalfour.zpe.core.ZPEStructure;
 import jamiebalfour.zpe.core.interfaces.ZPECustomFunction;
 import jamiebalfour.zpe.core.interfaces.ZPELibrary;
 import jamiebalfour.zpe.core.interfaces.ZPEType;
-import jamiebalfour.zpe.core.types.*;
+import jamiebalfour.zpe.core.types.ZPEBoolean;
+import jamiebalfour.zpe.core.types.ZPEList;
+import jamiebalfour.zpe.core.types.ZPEMap;
+import jamiebalfour.zpe.core.types.ZPENumber;
+import jamiebalfour.zpe.core.types.ZPEString;
 
 import javax.naming.NamingEnumeration;
 import javax.naming.directory.Attribute;
@@ -21,6 +24,73 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 public class Plugin implements ZPELibrary {
+  @Override
+  public Map<String, ZPECustomFunction> getFunctions() {
+    return new HashMap<>();
+  }
+
+  @Override
+  public Map<String, Class<? extends ZPEStructure>> getObjects() {
+    return new HashMap<>();
+  }
+
+  @Override
+  public Map<String, ZPEModule> getModules() {
+    HashMap<String, ZPEModule> map = new HashMap<>();
+    map.put("CLI", new CLIModule());
+    return map;
+  }
+
+  @Override
+  public boolean supportsWindows() {
+    return true;
+  }
+
+  @Override
+  public boolean supportsMacOs() {
+    return true;
+  }
+
+  @Override
+  public boolean supportsLinux() {
+    return true;
+  }
+
+  @Override
+  public String getName() {
+    return "CLI";
+  }
+
+  @Override
+  public String getVersionInfo() {
+    return "1.0";
+  }
+
+  public static class CLIModule extends ZPEModule {
+
+  public CLIModule() {
+    super("CLI");
+
+    addMethod(this, "grep", new Grep());
+    addMethod(this, "grep_file", new GrepFile());
+    addMethod(this, "grep_count", new GrepCount());
+    addMethod(this, "replace", new Replace());
+
+    addMethod(this, "wc", new Wc());
+    addMethod(this, "wc_file", new WcFile());
+    addMethod(this, "head_file", new HeadFile());
+    addMethod(this, "tail_file", new TailFile());
+
+    addMethod(this, "dns_a", new DnsA());
+    addMethod(this, "dns_aaaa", new DnsAAAA());
+    addMethod(this, "dns_mx", new DnsMX());
+    addMethod(this, "dns_txt", new DnsTXT());
+    addMethod(this, "reverse_dns", new ReverseDns());
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------------
 
   private static int regexFlagsFromString(String flags) {
     if (flags == null) return 0;
@@ -58,363 +128,327 @@ public class Plugin implements ZPELibrary {
   }
 
   private static ZPEList dnsQueryToList(String host, String type) throws Exception {
-    try {
-      DirContext ctx = dnsContext();
-      Attributes attrs = ctx.getAttributes(host, new String[]{type});
-      Attribute attr = attrs.get(type);
+    DirContext ctx = dnsContext();
+    Attributes attrs = ctx.getAttributes(host, new String[]{type});
+    Attribute attr = attrs.get(type);
 
-      ZPEList out = new ZPEList();
-      if (attr == null) return out;
+    ZPEList out = new ZPEList();
+    if (attr == null) return out;
 
-      NamingEnumeration<?> e = attr.getAll();
-      while (e.hasMore()) {
-        out.add(ZPEString.newStr(e.next().toString()));
-      }
-      return out;
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+    NamingEnumeration<?> e = attr.getAll();
+    while (e.hasMore()) {
+      Object next = e.next();
+      out.add(ZPEString.newStr(next == null ? "" : next.toString()));
     }
+    return out;
   }
 
   private static String dnsQueryFirst(String host, String type) throws Exception {
+    DirContext ctx = dnsContext();
+    Attributes attrs = ctx.getAttributes(host, new String[]{type});
+    Attribute attr = attrs.get(type);
+    if (attr == null) return "";
+
+    NamingEnumeration<?> e = attr.getAll();
+    if (!e.hasMore()) return "";
+
+    Object first = e.next();
+    return first == null ? "" : first.toString();
+  }
+
+  private static String getStringArg(ZPEType[] params, int index, String defaultValue) {
+    if (params == null || index >= params.length || params[index] == null) {
+      return defaultValue;
+    }
+    return params[index].toString();
+  }
+
+  private static int getIntArg(ZPEType[] params, int index, int defaultValue) {
+    if (params == null || index >= params.length || params[index] == null) {
+      return defaultValue;
+    }
+
     try {
-      DirContext ctx = dnsContext();
-      Attributes attrs = ctx.getAttributes(host, new String[]{type});
-      Attribute attr = attrs.get(type);
-      if (attr == null) return "";
-      NamingEnumeration<?> e = attr.getAll();
-      if (!e.hasMore()) return "";
-      Object first = e.next();
-      return first == null ? "" : first.toString();
+      return HelperFunctions.stringToInteger(params[index].toString());
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      return defaultValue;
     }
   }
 
-  // -----------------------
-  // Helpers
-  // -----------------------
+  // =========================================================================
+  // grep(text, pattern [, flags])
+  // =========================================================================
 
-  @Override
-  public Map<String, ZPECustomFunction> getFunctions() {
-    HashMap<String, ZPECustomFunction> arr = new HashMap<>();
-
-    // Text tools
-    arr.put("grep", new Grep());
-    arr.put("grep_file", new GrepFile());
-    arr.put("grep_count", new GrepCount());
-    arr.put("replace", new Replace());
-
-    // File/text counting
-    arr.put("wc", new Wc());
-    arr.put("wc_file", new WcFile());
-    arr.put("head_file", new HeadFile());
-    arr.put("tail_file", new TailFile());
-
-    // DNS tools
-    arr.put("dns_a", new DnsA());
-    arr.put("dns_aaaa", new DnsAAAA());
-    arr.put("dns_mx", new DnsMX());
-    arr.put("dns_txt", new DnsTXT());
-    arr.put("reverse_dns", new ReverseDns());
-
-    return arr;
-  }
-
-  @Override
-  public Map<String, Class<? extends ZPEStructure>> getObjects() {
-    return null;
-  }
-
-  @Override
-  public boolean supportsWindows() {
-    return true;
-  }
-
-  @Override
-  public boolean supportsMacOs() {
-    return true;
-  }
-
-  // -----------------------
-  // DNS helpers (JNDI DNS provider)
-  // -----------------------
-
-  @Override
-  public boolean supportsLinux() {
-    return true;
-  }
-
-  @Override
-  public String getName() {
-    return "libCLI";
-  }
-
-  @Override
-  public String getVersionInfo() {
-    return "1.0";
-  }
-
-  // ============================================================
-  // grep ([{string} text, {string} pattern [, {string} flags]])
-  // Returns: list | boolean
-  // ============================================================
-
-  public static class Grep implements ZPECustomFunction {
+  static class Grep implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns all lines from the provided text that match the given regex pattern.";
     }
 
     @Override
-    public String getManualHeader() {
-      return "grep ([{string} text, {string} pattern [, {string} flags]])";
+    public String version() {
+      return "";
     }
 
     @Override
+    public String manualHeader() {
+      return "grep ([{string} text, {string} pattern [, {string} flags]])";
+    }
+
     public int getMinimumParameters() {
       return 2;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"text", "pattern", "flags"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        String text = params.get("text").toString();
-        String pattern = params.get("pattern").toString();
-        String flags = params.containsKey("flags") ? params.get("flags").toString() : "";
+        String text = getStringArg(params, 0, "");
+        String pattern = getStringArg(params, 1, "");
+        String flags = getStringArg(params, 2, "");
 
         Pattern p = Pattern.compile(pattern, regexFlagsFromString(flags));
         String[] lines = splitLines(text);
 
         ArrayList<String> out = new ArrayList<>();
         for (String line : lines) {
-          if (p.matcher(line).find()) out.add(line);
+          if (p.matcher(line).find()) {
+            out.add(line);
+          }
         }
 
         return toZpeList(out);
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 0;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // grep_file ([{string} path, {string} pattern [, {string} flags]])
-  // Returns: list | boolean
-  // ============================================================
+  // =========================================================================
+  // grep_file(path, pattern [, flags])
+  // =========================================================================
 
-  public static class GrepFile implements ZPECustomFunction {
+  static class GrepFile implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns all lines from a file that match the given regex pattern.";
     }
 
     @Override
-    public String getManualHeader() {
-      return "grep_file ([{string} path, {string} pattern [, {string} flags]])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "grep_file ([{string} path, {string} pattern [, {string} flags]])";
+    }
+
     public int getMinimumParameters() {
       return 2;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"path", "pattern", "flags"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        Path path = Path.of(params.get("path").toString());
-        String pattern = params.get("pattern").toString();
-        String flags = params.containsKey("flags") ? params.get("flags").toString() : "";
+        Path path = Path.of(getStringArg(params, 0, ""));
+        String pattern = getStringArg(params, 1, "");
+        String flags = getStringArg(params, 2, "");
 
         Pattern p = Pattern.compile(pattern, regexFlagsFromString(flags));
 
         ArrayList<String> out = new ArrayList<>();
         for (String line : readAllLinesUtf8(path)) {
-          if (p.matcher(line).find()) out.add(line);
+          if (p.matcher(line).find()) {
+            out.add(line);
+          }
         }
 
         return toZpeList(out);
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // grep_count ([{string} text, {string} pattern [, {string} flags]])
-  // Returns: number | boolean
-  // ============================================================
+  // =========================================================================
+  // grep_count(text, pattern [, flags])
+  // =========================================================================
 
-  public static class GrepCount implements ZPECustomFunction {
+  static class GrepCount implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Counts how many lines in the provided text match the given regex pattern.";
     }
 
     @Override
-    public String getManualHeader() {
-      return "grep_count ([{string} text, {string} pattern [, {string} flags]])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "grep_count ([{string} text, {string} pattern [, {string} flags]])";
+    }
+
     public int getMinimumParameters() {
       return 2;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"text", "pattern", "flags"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        String text = params.get("text").toString();
-        String pattern = params.get("pattern").toString();
-        String flags = params.containsKey("flags") ? params.get("flags").toString() : "";
+        String text = getStringArg(params, 0, "");
+        String pattern = getStringArg(params, 1, "");
+        String flags = getStringArg(params, 2, "");
 
         Pattern p = Pattern.compile(pattern, regexFlagsFromString(flags));
         String[] lines = splitLines(text);
 
         int count = 0;
         for (String line : lines) {
-          if (p.matcher(line).find()) count++;
+          if (p.matcher(line).find()) {
+            count++;
+          }
         }
 
         return new ZPENumber(count);
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 0;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.NUMBER_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // replace ([{string} text, {string} pattern, {string} replacement [, {string} flags]])
-  // Returns: string | boolean
-  // ============================================================
+  // =========================================================================
+  // replace(text, pattern, replacement [, flags])
+  // =========================================================================
 
-  public static class Replace implements ZPECustomFunction {
+  static class Replace implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Replaces all matches of a regex pattern in text with the provided replacement string.";
     }
 
+
     @Override
-    public String getManualHeader() {
-      return "replace ([{string} text, {string} pattern, {string} replacement [, {string} flags]])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "replace ([{string} text, {string} pattern, {string} replacement [, {string} flags]])";
+    }
+
     public int getMinimumParameters() {
       return 3;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"text", "pattern", "replacement", "flags"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        String text = params.get("text").toString();
-        String pattern = params.get("pattern").toString();
-        String replacement = params.get("replacement").toString();
-        String flags = params.containsKey("flags") ? params.get("flags").toString() : "";
+        String text = getStringArg(params, 0, "");
+        String pattern = getStringArg(params, 1, "");
+        String replacement = getStringArg(params, 2, "");
+        String flags = getStringArg(params, 3, "");
 
         Pattern p = Pattern.compile(pattern, regexFlagsFromString(flags));
         return ZPEString.newStr(p.matcher(text).replaceAll(replacement));
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 0;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.STRING_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // wc ([{string} text])
-  // Returns: map | boolean
-  // ============================================================
+  // =========================================================================
+  // wc(text)
+  // =========================================================================
 
-  public static class Wc implements ZPECustomFunction {
+  static class Wc implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns counts for lines, words, characters and bytes in a string.";
     }
 
+
     @Override
-    public String getManualHeader() {
-      return "wc ([{string} text])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "wc ([{string} text])";
+    }
+
     public int getMinimumParameters() {
       return 1;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"text"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        String text = params.get("text").toString();
+        String text = getStringArg(params, 0, "");
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
 
         int lines = text.isEmpty() ? 0 : splitLines(text).length;
@@ -429,52 +463,54 @@ public class Plugin implements ZPELibrary {
         m.put(new ZPEString("bytes"), new ZPENumber(byteCount));
         return m;
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 0;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.MAP_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // wc_file ([{string} path])
-  // Returns: map | boolean
-  // ============================================================
+  // =========================================================================
+  // wc_file(path)
+  // =========================================================================
 
-  public static class WcFile implements ZPECustomFunction {
+  static class WcFile implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns counts for lines, words, characters and bytes in a UTF-8 text file.";
     }
 
+
     @Override
-    public String getManualHeader() {
-      return "wc_file ([{string} path])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "wc_file ([{string} path])";
+    }
+
     public int getMinimumParameters() {
       return 1;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"path"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        Path p = Path.of(params.get("path").toString());
+        Path p = Path.of(getStringArg(params, 0, ""));
         byte[] bytes = Files.readAllBytes(p);
         String text = new String(bytes, StandardCharsets.UTF_8);
 
@@ -490,369 +526,381 @@ public class Plugin implements ZPELibrary {
         m.put(new ZPEString("bytes"), new ZPENumber(byteCount));
         return m;
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.MAP_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // head_file ([{string} path, {number} n])
-  // Returns: list | boolean
-  // ============================================================
+  // =========================================================================
+  // head_file(path, n)
+  // =========================================================================
 
-  public static class HeadFile implements ZPECustomFunction {
+  static class HeadFile implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns the first n lines of a UTF-8 text file.";
     }
 
+
     @Override
-    public String getManualHeader() {
-      return "head_file ([{string} path, {number} n])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "head_file ([{string} path, {number} n])";
+    }
+
     public int getMinimumParameters() {
       return 2;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"path", "n"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        Path p = Path.of(params.get("path").toString());
-        int n = HelperFunctions.stringToInteger(params.get("n").toString());
+        Path p = Path.of(getStringArg(params, 0, ""));
+        int n = getIntArg(params, 1, 0);
         if (n < 0) n = 0;
 
         List<String> lines = readAllLinesUtf8(p);
         int end = Math.min(n, lines.size());
         return toZpeList(lines.subList(0, end));
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // tail_file ([{string} path, {number} n])
-  // Returns: list | boolean
-  // ============================================================
+  // =========================================================================
+  // tail_file(path, n)
+  // =========================================================================
 
-  public static class TailFile implements ZPECustomFunction {
+  static class TailFile implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns the last n lines of a UTF-8 text file.";
     }
 
+
     @Override
-    public String getManualHeader() {
-      return "tail_file ([{string} path, {number} n])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "tail_file ([{string} path, {number} n])";
+    }
+
     public int getMinimumParameters() {
       return 2;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"path", "n"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        Path p = Path.of(params.get("path").toString());
-        int n = HelperFunctions.stringToInteger(params.get("n").toString());
+        Path p = Path.of(getStringArg(params, 0, ""));
+        int n = getIntArg(params, 1, 0);
         if (n < 0) n = 0;
 
         List<String> lines = readAllLinesUtf8(p);
         int start = Math.max(0, lines.size() - n);
         return toZpeList(lines.subList(start, lines.size()));
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // dns_a ([{string} host])
-  // Returns: list | boolean
-  // ============================================================
+  // =========================================================================
+  // dns_a(host)
+  // =========================================================================
 
-  public static class DnsA implements ZPECustomFunction {
+  static class DnsA implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns DNS A records for a host.";
     }
 
+
     @Override
-    public String getManualHeader() {
+    public String version() {
+      return "1.0";
+    }
+
+    @Override
+    public String manualHeader() {
       return "dns_a ([{string} host])";
     }
 
-    @Override
     public int getMinimumParameters() {
       return 1;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"host"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        return dnsQueryToList(params.get("host").toString(), "A");
+        return dnsQueryToList(getStringArg(params, 0, ""), "A");
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // dns_aaaa ([{string} host])
-  // Returns: list | boolean
-  // ============================================================
+  // =========================================================================
+  // dns_aaaa(host)
+  // =========================================================================
 
-  public static class DnsAAAA implements ZPECustomFunction {
+  static class DnsAAAA implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns DNS AAAA records for a host.";
     }
 
+
     @Override
-    public String getManualHeader() {
+    public String version() {
+      return "1.0";
+    }
+
+    @Override
+    public String manualHeader() {
       return "dns_aaaa ([{string} host])";
     }
 
-    @Override
     public int getMinimumParameters() {
       return 1;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"host"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        return dnsQueryToList(params.get("host").toString(), "AAAA");
+        return dnsQueryToList(getStringArg(params, 0, ""), "AAAA");
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // dns_mx ([{string} host])
-  // Returns: list | boolean
-  // ============================================================
+  // =========================================================================
+  // dns_mx(host)
+  // =========================================================================
 
-  public static class DnsMX implements ZPECustomFunction {
+  static class DnsMX implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns DNS MX records for a host.";
     }
 
+
     @Override
-    public String getManualHeader() {
+    public String version() {
+      return "1.0";
+    }
+
+    @Override
+    public String manualHeader() {
       return "dns_mx ([{string} host])";
     }
 
-    @Override
     public int getMinimumParameters() {
       return 1;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"host"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        return dnsQueryToList(params.get("host").toString(), "MX");
+        return dnsQueryToList(getStringArg(params, 0, ""), "MX");
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // dns_txt ([{string} host])
-  // Returns: list | boolean
-  // ============================================================
+  // =========================================================================
+  // dns_txt(host)
+  // =========================================================================
 
-  public static class DnsTXT implements ZPECustomFunction {
+  static class DnsTXT implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Returns DNS TXT records for a host.";
     }
 
+
     @Override
-    public String getManualHeader() {
-      return "dns_txt ([{string} host])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "dns_txt ([{string} host])";
+    }
+
     public int getMinimumParameters() {
       return 1;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"host"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        return dnsQueryToList(params.get("host").toString(), "TXT");
+        return dnsQueryToList(getStringArg(params, 0, ""), "TXT");
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.LIST_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
 
-  // ============================================================
-  // reverse_dns ([{string} ip])
-  // Returns: string | boolean
-  // ============================================================
+  // =========================================================================
+  // reverse_dns(ip)
+  // =========================================================================
 
-  public static class ReverseDns implements ZPECustomFunction {
+  static class ReverseDns implements ZPEModuleMethod {
 
     @Override
-    public String getManualEntry() {
+    public String manualEntry() {
       return "Performs a reverse DNS lookup (PTR) for an IPv4 address.";
     }
 
+
     @Override
-    public String getManualHeader() {
-      return "reverse_dns ([{string} ip])";
+    public String version() {
+      return "1.0";
     }
 
     @Override
+    public String manualHeader() {
+      return "reverse_dns ([{string} ip])";
+    }
+
     public int getMinimumParameters() {
       return 1;
     }
 
-    @Override
     public String[] getParameterNames() {
       return new String[]{"ip"};
     }
 
     @Override
-    public ZPEType MainMethod(HashMap<String, Object> params, ZPERuntimeEnvironment runtime, ZPEFunction fn) {
+    public ZPEType call(ZPEType[] params) {
       try {
-        String ip = params.get("ip").toString();
-
-        // IPv4 only for now
+        String ip = getStringArg(params, 0, "");
         String[] parts = ip.split("\\.");
+
         if (parts.length != 4) {
-          return new ZPEBoolean(false);
+          return ZPEBoolean.FALSE();
         }
 
         String rev = parts[3] + "." + parts[2] + "." + parts[1] + "." + parts[0] + ".in-addr.arpa";
         String ptr = dnsQueryFirst(rev, "PTR");
         return ZPEString.newStr(ptr);
       } catch (Exception e) {
-        return new ZPEBoolean(false);
+        return ZPEBoolean.FALSE();
       }
     }
 
     @Override
-    public int getRequiredPermissionLevel() {
+    public int permissionLevel() {
       return 3;
     }
 
-    @Override
     public byte[] getReturnTypes() {
       return new byte[]{YASSByteCodes.STRING_TYPE, YASSByteCodes.BOOLEAN_TYPE};
     }
   }
-}
+}}
